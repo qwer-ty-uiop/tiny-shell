@@ -456,7 +456,7 @@ void sigint_handler(int sig) {
     if ((pid = fgpid(jobs)) != 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL);
         /*execute ctrl + C*/
-        Kill(-pid, SIGINT);
+        kill(-pid, SIGINT);
     }
     /*recover errno*/
     errno = oldErrno;
@@ -478,7 +478,7 @@ void sigtstp_handler(int sig) {
     if ((pid = fgpid(jobs)) != 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL);
         /*execute ctrl + C*/
-        Kill(-pid, SIGINT);
+        kill(-pid, SIGINT);
     }
     /*recover errno*/
     errno = oldErrno;
