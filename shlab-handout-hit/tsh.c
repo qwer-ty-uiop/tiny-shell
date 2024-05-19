@@ -296,10 +296,14 @@ int parseline(const char* cmdline, char** argv) {
  *    it immediately.
  */
 int builtin_cmd(char** argv) {
+    /*use mask if command is job*/
+    sigset_t mask, prev;
+    sigfillset(&mask);
+
     /*command is quit process*/
     if (!strcmp(argv[0], "quit"))
         exit(0);
-    /*command is &*/
+    /*ignore "&"*/
     if (!strcmp(argv[0], "&"))
         return 1;
     /*command is do bg or fg*/
@@ -309,7 +313,11 @@ int builtin_cmd(char** argv) {
     }
     /*command is to list jobs*/
     if (!strcmp(argv[0], "jobs")) {
+        /*block all signal when visit global variable*/
+        sigprocmask(SIG_BLOCK, &mask, &prev);
         listjobs(jobs);
+        /*restore previous mask*/
+        sigprocmask(SIG_SETMASK, &prev, NULL);
         return 1;
     }
     return 0; /* not a builtin command */
@@ -372,15 +380,13 @@ void do_bgfg(char** argv) {
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid) {
-    sigset_t mask, prev;
-    /*clear all signals from mask*/
-    sigemptyset(&mask);
-    /*change the set of blocked signals*/
-    sigprocmask(SIG_BLOCK, &mask, &prev);
-    /*block until process pid is no longer the foreground process*/
-    while (fgpid(jobs) == pid)
-        sigsuspend(&prev);
-    sigprocmask(SIG_BLOCK, &prev, NULL);
+    sigset_t mask;
+    while (fgpid(jobs) != 0)
+        /**
+         * when there is a foreground process, block, pause, then remove block
+         * when recvive SIGCHLD
+         */
+        sigsuspend(&mask);
     return;
 }
 
@@ -396,6 +402,42 @@ void waitfg(pid_t pid) {
  *     currently running children to terminate.
  */
 void sigchld_handler(int sig) {
+    struct job_t* job;
+    pid_t pid;
+    sigset_t mask, prev;
+    sigfillset(&mask);
+    int exitStatus;
+    /*log old errno prevent there are new error and overwrite the previous one*/
+    int oldErrno = errno;
+    /**
+     * "-1":wait all of the child process
+     * exitStatus: show why process exit
+     * WNOHANG: when child process is running return 0
+     * WUNTRACED: when child process suspend return its pid
+     */
+    while ((pid = waitpid(-1, &exitStatus, WNOHANG | WUNTRACED)) > 0) {
+        /*block all signal when we need to delete job*/
+        sigprocmask(SIG_BLOCK, &mask, &prev);
+        /*find the suspended or finished job through pid*/
+        job = getjobpid(jobs, pid);
+
+        if (WIFSTOPPED(exitStatus)) { /*process is stopped*/
+            job->state = ST;
+            printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
+                   job->pid, WSTOPSIG(exitStatus));
+        } else {
+            if (WIFSIGNALED(exitStatus)) /*process is terminated by signal*/
+                printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
+                       job->pid, WSTOPSIG(exitStatus));
+            /*if process terminates normally,do nothing*/
+            /*delete process*/
+            deletejob(jobs, pid);
+        }
+        fflush(stdout);
+        /*restore mask*/
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+    }
+    errno = oldErrno;
     return;
 }
 
@@ -405,6 +447,19 @@ void sigchld_handler(int sig) {
  *    to the foreground job.
  */
 void sigint_handler(int sig) {
+    pid_t pid;
+    int oldErrno = errno;
+    sigset_t mask, prev;
+    /*need to use global variable jobs,block all signal*/
+    sigfillset(&mask);
+    sigprocmask(SIG_BLOCK, &mask, &prev);
+    if ((pid = fgpid(jobs)) != 0) {
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+        /*execute ctrl + C*/
+        Kill(-pid, SIGINT);
+    }
+    /*recover errno*/
+    errno = oldErrno;
     return;
 }
 
@@ -414,6 +469,19 @@ void sigint_handler(int sig) {
  *     foreground job by sending it a SIGTSTP.
  */
 void sigtstp_handler(int sig) {
+    pid_t pid;
+    int oldErrno = errno;
+    sigset_t mask, prev;
+    /*need to use global variable jobs,block all signal*/
+    sigfillset(&mask);
+    sigprocmask(SIG_BLOCK, &mask, &prev);
+    if ((pid = fgpid(jobs)) != 0) {
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+        /*execute ctrl + C*/
+        Kill(-pid, SIGINT);
+    }
+    /*recover errno*/
+    errno = oldErrno;
     return;
 }
 
