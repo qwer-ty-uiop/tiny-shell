@@ -1,2 +1,3 @@
 *.exe
 ./shlab-handout-hit/*.exe
+.vscode/

@@ -2,7 +2,10 @@
  * tsh - A tiny shell program with job control
  *
  * <Put your name and login ID here>
+ * 汤弋 2022113216
  */
+// #include <asm-generic/signal-defs.h>
+// #include <asm-generic/signal.h>
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
@@ -293,6 +296,22 @@ int parseline(const char* cmdline, char** argv) {
  *    it immediately.
  */
 int builtin_cmd(char** argv) {
+    /*command is quit process*/
+    if (!strcmp(argv[0], "quit"))
+        exit(0);
+    /*command is &*/
+    if (!strcmp(argv[0], "&"))
+        return 1;
+    /*command is do bg or fg*/
+    if (!strcmp(argv[0], "fg") || !strcmp(argv[0], "bg")) {
+        do_bgfg(argv);
+        return 1;
+    }
+    /*command is to list jobs*/
+    if (!strcmp(argv[0], "jobs")) {
+        listjobs(jobs);
+        return 1;
+    }
     return 0; /* not a builtin command */
 }
 
@@ -353,6 +372,15 @@ void do_bgfg(char** argv) {
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid) {
+    sigset_t mask, prev;
+    /*clear all signals from mask*/
+    sigemptyset(&mask);
+    /*change the set of blocked signals*/
+    sigprocmask(SIG_BLOCK, &mask, &prev);
+    /*block until process pid is no longer the foreground process*/
+    while (fgpid(jobs) == pid)
+        sigsuspend(&prev);
+    sigprocmask(SIG_BLOCK, &prev, NULL);
     return;
 }
 
