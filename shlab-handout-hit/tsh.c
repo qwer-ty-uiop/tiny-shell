@@ -426,7 +426,7 @@ void sigchld_handler(int sig) {
         } else {
             if (WIFSIGNALED(exitStatus)) /*因为信号而终止*/
                 printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
-                       job->pid, WSTOPSIG(exitStatus));
+                       job->pid, WTERMSIG(exitStatus));
             /*进程正常终止，不需要额外做什么，删除进程就行*/
             /*删除进程*/
             deletejob(jobs, pid);
