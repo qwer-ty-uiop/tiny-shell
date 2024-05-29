@@ -476,7 +476,7 @@ void sigtstp_handler(int sig) {
     if ((pid = fgpid(jobs)) != 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL);
         /*对进程组执行 ctrl + Z，暂停进程*/
-        kill(-pid, SIGSTOP);
+        kill(-pid, SIGTSTP);
     }
     /*恢复 errno*/
     errno = oldErrno;
