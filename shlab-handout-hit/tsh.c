@@ -296,31 +296,27 @@ int parseline(const char* cmdline, char** argv) {
  *    it immediately.
  */
 int builtin_cmd(char** argv) {
-    /*use mask if command is job*/
+    /*如果命令是job，那么需要用到阻塞mask*/
     sigset_t mask, prev;
     sigfillset(&mask);
 
-    /*command is quit process*/
     if (!strcmp(argv[0], "quit"))
         exit(0);
-    /*ignore "&"*/
     if (!strcmp(argv[0], "&"))
         return 1;
-    /*command is do bg or fg*/
     if (!strcmp(argv[0], "fg") || !strcmp(argv[0], "bg")) {
         do_bgfg(argv);
         return 1;
     }
-    /*command is to list jobs*/
     if (!strcmp(argv[0], "jobs")) {
-        /*block all signal when visit global variable*/
+        /*访问全局变量时要阻塞所有信号*/
         sigprocmask(SIG_BLOCK, &mask, &prev);
         listjobs(jobs);
-        /*restore previous mask*/
+        /*恢复先前的阻塞信号*/
         sigprocmask(SIG_SETMASK, &prev, NULL);
         return 1;
     }
-    return 0; /* not a builtin command */
+    return 0; /*不是内置函数则返回0*/
 }
 
 /*
@@ -381,10 +377,12 @@ void do_bgfg(char** argv) {
  */
 void waitfg(pid_t pid) {
     sigset_t mask;
+    sigemptyset(&mask);
     while (fgpid(jobs) != 0)
         /**
-         * when there is a foreground process, block, pause, then remove block
-         * when recvive SIGCHLD
+         * 如果有一个前台作业，那么将他阻塞并且暂停，
+         * 直到前台进程回收，即当收到SIGCHLD信号时取消阻塞
+         * 用sigsuspend实现
          */
         sigsuspend(&mask);
     return;
@@ -407,36 +405,37 @@ void sigchld_handler(int sig) {
     sigset_t mask, prev;
     sigfillset(&mask);
     int exitStatus;
-    /*log old errno prevent there are new error and overwrite the previous one*/
+    /*记录旧的errno，防止信号处理过程中产生新错误时,覆盖先前的errno*/
     int oldErrno = errno;
     /**
-     * "-1":wait all of the child process
-     * exitStatus: show why process exit
-     * WNOHANG: when child process is running return 0
-     * WUNTRACED: when child process suspend return its pid
+     * "-1": 等待所有的子进程
+     * exitStatus: 退出状态
+     * WNOHANG: 子进程还在运行则返回0
+     * WUNTRACED: 子进程暂停则返回他的pid
      */
     while ((pid = waitpid(-1, &exitStatus, WNOHANG | WUNTRACED)) > 0) {
-        /*block all signal when we need to delete job*/
+        /*删除job时阻塞所有信号*/
         sigprocmask(SIG_BLOCK, &mask, &prev);
-        /*find the suspended or finished job through pid*/
+        /*用pid找到暂停或者结束的job*/
         job = getjobpid(jobs, pid);
 
-        if (WIFSTOPPED(exitStatus)) { /*process is stopped*/
+        if (WIFSTOPPED(exitStatus)) { /*因为信号而暂停*/
             job->state = ST;
             printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
                    job->pid, WSTOPSIG(exitStatus));
         } else {
-            if (WIFSIGNALED(exitStatus)) /*process is terminated by signal*/
+            if (WIFSIGNALED(exitStatus)) /*因为信号而终止*/
                 printf("Job [%d] (%d) terminated by signal %d\n", job->jid,
                        job->pid, WSTOPSIG(exitStatus));
-            /*if process terminates normally,do nothing*/
-            /*delete process*/
+            /*进程正常终止，不需要额外做什么，删除进程就行*/
+            /*删除进程*/
             deletejob(jobs, pid);
         }
         fflush(stdout);
-        /*restore mask*/
+        /*恢复mask*/
         sigprocmask(SIG_SETMASK, &prev, NULL);
     }
+    /*恢复errno*/
     errno = oldErrno;
     return;
 }
@@ -450,15 +449,15 @@ void sigint_handler(int sig) {
     pid_t pid;
     int oldErrno = errno;
     sigset_t mask, prev;
-    /*need to use global variable jobs,block all signal*/
+    /*用到全局变量，阻塞所有信号*/
     sigfillset(&mask);
     sigprocmask(SIG_BLOCK, &mask, &prev);
     if ((pid = fgpid(jobs)) != 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL);
-        /*execute ctrl + C*/
+        /*对进程组执行 ctrl + C*/
         kill(-pid, SIGINT);
     }
-    /*recover errno*/
+    /*恢复 errno*/
     errno = oldErrno;
     return;
 }
@@ -472,15 +471,14 @@ void sigtstp_handler(int sig) {
     pid_t pid;
     int oldErrno = errno;
     sigset_t mask, prev;
-    /*need to use global variable jobs,block all signal*/
     sigfillset(&mask);
     sigprocmask(SIG_BLOCK, &mask, &prev);
     if ((pid = fgpid(jobs)) != 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL);
-        /*execute ctrl + C*/
-        kill(-pid, SIGINT);
+        /*对进程组执行 ctrl + Z，暂停进程*/
+        kill(-pid, SIGSTOP);
     }
-    /*recover errno*/
+    /*恢复 errno*/
     errno = oldErrno;
     return;
 }
